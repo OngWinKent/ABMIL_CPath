@@ -74,7 +74,7 @@ Select the feature encoder with `--enc_name`.
 
 | Encoder argument | Encoder architecture |
 | --- | --- |
-| `r18` | ResNet-18 (ImageNet-1K pretrained) |
+| `r18` | ResNet-18 |
 | `r50` | ResNet-50 |
 | `chief` | CHIEF |
 | `uni` | UNI |
