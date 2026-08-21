@@ -1,0 +1,20 @@
+einops
+jpeg4py
+lmdb
+opencv-python
+pandas
+PyTurboJPEG
+scikit-learn
+scikit-survival
+timm
+torch
+torchmetrics
+torchvision
+wandb
+h5py
+future
+torchaug # Install with no dependency as it might interrupt current torch cuda version
+fairscale
+GitPython
+torchmil
+torch_geometric
