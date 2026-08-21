@@ -243,4 +243,3 @@ This work builds on:
 ## License and Copyright
 
 The project is open source under BSD-3 license (see the `LICENSE` file).
-"# ABMIL_CPath" 
