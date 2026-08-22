@@ -225,6 +225,8 @@ If you use a dataset included in this benchmark, please cite its original public
 - **PANDA:** [Bulten et al., *Nature Medicine* (2022)](https://doi.org/10.1038/s41591-021-01620-2)
 - **TCGA-BRCA:** [The Cancer Genome Atlas Network, *Nature* (2012)](https://doi.org/10.1038/nature11412)
 
+### Previos work citations
+
 This work builds on:
 - Ilse, M et al. (2018). *Attention-based Deep Multiple Instance Learning*. [arXiv:1802.04712](https://arxiv.org/pdf/1802.04712).
 
