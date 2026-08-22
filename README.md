@@ -89,7 +89,7 @@ Select the aggregation model with `--mil_name`.
 | MIL argument | Paper | Original Github Repository |
 | --- | --- | --- |
 | `abmil` | [Attention-based Deep Multiple Instance Learning](https://arxiv.org/pdf/1802.04712) | [AttentionDeepMIL](https://github.com/AMLab-Amsterdam/AttentionDeepMIL) |
-| `rrtmil` | [Feature Re-Embedding: Towards Foundation Model-Level Performance in Computational Pathology](https://arxiv.org/pdf/2106.00908) | [RRT-MIL](https://github.com/DearCaat/RRT-MIL) |
+| `rrtmil` | [Feature Re-Embedding: Towards Foundation Model-Level Performance in Computational Pathology](https://arxiv.org/pdf/2402.17228) | [RRT-MIL](https://github.com/DearCaat/RRT-MIL) |
 | `transmil` | [TransMIL: Transformer-based Correlated Multiple Instance Learning for Whole Slide Image Classification](https://arxiv.org/pdf/2106.00908) | [TransMIL](https://github.com/szc19990412/TransMIL) |
 | `dsmil` | [Dual-Stream Multiple Instance Learning Network for Whole Slide Image Classification with Self-Supervised Contrastive Learning](https://arxiv.org/pdf/2011.08939) | [dsmil-wsi](https://github.com/binli123/dsmil-wsi) |
 | `wikg` | [Dynamic Graph Representation with Knowledge-Aware Attention for Histopathology Whole Slide Image Analysis](https://arxiv.org/pdf/2403.07719) | [WiKG](https://github.com/WonderLandxD/WiKG) |
