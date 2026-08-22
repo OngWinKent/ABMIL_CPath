@@ -16,6 +16,7 @@ from functools import partial
 from torch.utils.data import Dataset
 import random
 from copy import deepcopy
+from pathlib import Path
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -826,4 +827,64 @@ class MultiScaleDataset(Dataset):
 
         return output
 
+"""PyTorch Dataset to load WSI features, slide labels, patch labels, and coordinates."""
+class SlideDataset(Dataset):
+    def __init__(self, root_dir: str, dataset_name: str):
+        root_dir = Path(root_dir) / dataset_name
+        csv_path = root_dir / f"{dataset_name}.csv"
 
+        self.coords_dir = root_dir / "coords"
+        self.patch_labels_dir = root_dir / "patch_labels"
+        self.features_dir = root_dir / "uni" / "pt_files"
+        self.label_col = "label"
+
+        df_raw = pd.read_csv(csv_path)
+
+        # Pre-filter dataset: Keep only slides where ALL required files exist
+        valid_indices = []
+        for idx, row in df_raw.iterrows():
+            slide_id = Path(str(row["slide"])).stem
+
+            # Check required files
+            feat_path = self.features_dir / f"{slide_id}.pt"
+            coords_path = self.coords_dir / f"{slide_id}.npy"
+            patch_label_npy = self.patch_labels_dir / f"{slide_id}.npy"
+
+            # Must have features, coords, and patch_label
+            if (
+                feat_path.exists()
+                and coords_path.exists()
+                and patch_label_npy.exists()
+            ):
+                valid_indices.append(idx)
+
+        # Filter dataframe and reset index
+        self.df = df_raw.iloc[valid_indices].reset_index(drop=True)
+
+        print(
+            f"[Dataset] Loaded {len(self.df)} / {len(df_raw)} valid slides (Skipped {len(df_raw) - len(self.df)} due to missing files)."
+        )
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx: int):
+        raw_slide = str(self.df.iloc[idx]["slide"])
+        slide_id = Path(raw_slide).stem
+
+        # Load Features (.pt file)
+        feat_path = self.features_dir / f"{slide_id}.pt"
+        features = torch.load(feat_path, weights_only=True)
+
+        # Slide-level Label (from CSV)
+        label = torch.tensor(self.df.iloc[idx][self.label_col])
+
+        # Patch-level Labels (.npy file with robust 0D/dict unwrapping)
+        patch_label_path = self.patch_labels_dir / f"{slide_id}.npy"
+        patch_label = np.load(patch_label_path)
+
+        # Patch Coordinates (.npy file)
+        coords_path = self.coords_dir / f"{slide_id}.npy"
+        coords = np.load(coords_path)
+
+        return slide_id, features, label, patch_label, coords
