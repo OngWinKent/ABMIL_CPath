@@ -1,7 +1,6 @@
 import warnings
 warnings.filterwarnings("ignore")
 import time
-from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -11,73 +10,12 @@ from tqdm import tqdm
 from options import get_parse_args
 import lmdb
 import pickle
-from PIL import Image
+from PIL import Image, ImageDraw
 import io
 from datasets import build_dataloader
 from modules import build_model
 import matplotlib.pyplot as plt
-
-"""PyTorch Dataset to load WSI features, slide labels, patch labels, and coordinates."""
-class SlideDataset(Dataset):
-    def __init__(self, root_dir: str, dataset_name: str):
-        root_dir = Path(root_dir) / dataset_name
-        csv_path = root_dir / f"{dataset_name}.csv"
-
-        self.coords_dir = root_dir / "coords"
-        self.patch_labels_dir = root_dir / "patch_labels"
-        self.features_dir = root_dir / "uni" / "pt_files"
-        self.label_col = "label"
-
-        df_raw = pd.read_csv(csv_path)
-
-        # Pre-filter dataset: Keep only slides where ALL required files exist
-        valid_indices = []
-        for idx, row in df_raw.iterrows():
-            slide_id = Path(str(row["slide"])).stem
-
-            # Check required files
-            feat_path = self.features_dir / f"{slide_id}.pt"
-            coords_path = self.coords_dir / f"{slide_id}.npy"
-            patch_label_npy = self.patch_labels_dir / f"{slide_id}.npy"
-
-            # Must have features, coords, and patch_label
-            if (
-                feat_path.exists()
-                and coords_path.exists()
-                and patch_label_npy.exists()
-            ):
-                valid_indices.append(idx)
-
-        # Filter dataframe and reset index
-        self.df = df_raw.iloc[valid_indices].reset_index(drop=True)
-
-        print(
-            f"[Dataset] Loaded {len(self.df)} / {len(df_raw)} valid slides (Skipped {len(df_raw) - len(self.df)} due to missing files)."
-        )
-
-    def __len__(self) -> int:
-        return len(self.df)
-
-    def __getitem__(self, idx: int):
-        raw_slide = str(self.df.iloc[idx]["slide"])
-        slide_id = Path(raw_slide).stem
-
-        # 1. Load Features (.pt file)
-        feat_path = self.features_dir / f"{slide_id}.pt"
-        features = torch.load(feat_path, weights_only=True)
-
-        # 2. Slide-level Label (from CSV)
-        label = torch.tensor(self.df.iloc[idx][self.label_col])
-
-        # 3. Patch-level Labels (.npy file with robust 0D/dict unwrapping)
-        patch_label_path = self.patch_labels_dir / f"{slide_id}.npy"
-        patch_label = np.load(patch_label_path)
-
-        # 4. Patch Coordinates (.npy file)
-        coords_path = self.coords_dir / f"{slide_id}.npy"
-        coords = np.load(coords_path)
-
-        return slide_id, features, label, patch_label, coords
+from datasets import data_utils
 
 """Load every patch belonging to one slide from LMDB."""
 def load_slide_patches(txn: lmdb.Transaction, slide_id: str, patch_count: int, thumbnail_size: int = 0) -> list[Image.Image]:
@@ -109,7 +47,6 @@ def construct_img(coords: np.ndarray, patches_imgs: list[Image.Image], patch_siz
     patch_w, patch_h = patches_imgs[0].size
     
     # Check if coords are in level-0 pixel units (e.g., 0, 512, 1024) or grid indices (e.g., 0, 1, 2)
-    # Scale coordinates relative to thumbnail patch size
     max_x, max_y = np.max(coords, axis=0)
     
     if max_x > 100 or max_y > 100:  # Coordinates are level-0 pixel values
@@ -134,11 +71,10 @@ def construct_img(coords: np.ndarray, patches_imgs: list[Image.Image], patch_siz
 
     return canvas
 
-"""Reconstructs WSI with bounding box overlays highlighting patch labels (y_inst == 1)."""
-def construct_img_label(coords: np.ndarray,patches_imgs: list[Image.Image],y_inst: np.ndarray,patch_size: int = 512) -> Image.Image:
-    """Reconstructs WSI canvas showing ONLY patches with positive instance labels (y_inst == 1)."""
+"""Reconstructs WSI showing ONLY patches with positive instance labels (y_inst == 1)."""
+def construct_img_label(coords: np.ndarray, patches_imgs: list[Image.Image], y_inst: np.ndarray, patch_size: int = 512) -> Image.Image:
     if len(coords) != len(patches_imgs) or len(coords) != len(y_inst):
-        raise ValueError( "coords, patches_imgs, and y_inst must all have the same length.")
+        raise ValueError("coords, patches_imgs, and y_inst must all have the same length.")
     bg_color: tuple = (255, 255, 255)
     patch_w, patch_h = patches_imgs[0].size
     max_x, max_y = np.max(coords, axis=0)
@@ -167,14 +103,7 @@ def construct_img_label(coords: np.ndarray,patches_imgs: list[Image.Image],y_ins
 
     return canvas
 
-"""Get a sample from a loader"""
-def get_sample(loader, slide_id: str):
-    for i in loader:
-        if slide_id in i['slide_id']:
-            return i
-    return None
-
-"""Attention heapmap visualization"""
+"""Attention heatmap visualization"""
 def construct_attn_heatmap(
     coords: np.ndarray,
     attn_weights: np.ndarray,
@@ -231,17 +160,170 @@ def construct_attn_heatmap(
 
     return Image.fromarray(blended_arr)
 
+"""Helper to render dots onto a PIL Image canvas based on coordinates."""
+def _render_dot_canvas(
+    coords: np.ndarray,
+    point_colors: list = None,
+    default_color: tuple = (180, 180, 180),
+    patch_size: int = 512,
+    scale_factor: int = 12,
+    dot_radius: int = 4,
+) -> Image.Image:
+    if len(coords) == 0:
+        return Image.new("RGB", (100, 100), color=(255, 255, 255))
+
+    max_x, max_y = np.max(coords, axis=0)
+    if max_x > 100 or max_y > 100:  # Pixel coordinates
+        gx = np.round(coords[:, 0] / patch_size).astype(int)
+        gy = np.round(coords[:, 1] / patch_size).astype(int)
+    else:  # Grid coordinates
+        gx = np.round(coords[:, 0]).astype(int)
+        gy = np.round(coords[:, 1]).astype(int)
+
+    max_gx, max_gy = np.max(gx), np.max(gy)
+    canvas_w = int((max_gx + 2) * scale_factor)
+    canvas_h = int((max_gy + 2) * scale_factor)
+
+    canvas = Image.new("RGB", (canvas_w, canvas_h), color=(255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    for i, (x, y) in enumerate(zip(gx, gy)):
+        cx = (x + 1) * scale_factor
+        cy = (y + 1) * scale_factor
+        # Safe lookup: falls back to default_color if index exceeds point_colors
+        if point_colors is not None and i < len(point_colors):
+            color = point_colors[i]
+        else:
+            color = default_color
+        draw.ellipse(
+            [cx - dot_radius, cy - dot_radius, cx + dot_radius, cy + dot_radius],
+            fill=color,
+        )
+
+    return canvas
+
+"""Helper to render dots onto a PIL Image canvas with variable sizes and z-ordering."""
+def _render_dot_canvas_variable(
+    coords: np.ndarray,
+    point_colors: list = None,
+    default_color: tuple = (180, 180, 180),
+    dot_radii: list = None,
+    patch_size: int = 512,
+    scale_factor: int = 12,
+    default_dot_radius: int = 4,
+) -> Image.Image:
+    if len(coords) == 0:
+        return Image.new("RGB", (100, 100), color=(255, 255, 255))
+
+    max_x, max_y = np.max(coords, axis=0)
+    if max_x > 100 or max_y > 100:  # Pixel coordinates
+        gx = np.round(coords[:, 0] / patch_size).astype(int)
+        gy = np.round(coords[:, 1] / patch_size).astype(int)
+    else:  # Grid coordinates
+        gx = np.round(coords[:, 0]).astype(int)
+        gy = np.round(coords[:, 1]).astype(int)
+
+    max_gx, max_gy = np.max(gx), np.max(gy)
+    canvas_w = int((max_gx + 2) * scale_factor)
+    canvas_h = int((max_gy + 2) * scale_factor)
+
+    canvas = Image.new("RGB", (canvas_w, canvas_h), color=(255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    # Sort indices so larger/important dots are drawn LAST (on top)
+    indices = list(range(len(coords)))
+    if dot_radii is not None:
+        indices.sort(key=lambda idx: dot_radii[idx])
+
+    for i in indices:
+        cx = (gx[i] + 1) * scale_factor
+        cy = (gy[i] + 1) * scale_factor
+        
+        color = point_colors[i] if (point_colors is not None and i < len(point_colors)) else default_color
+        r = dot_radii[i] if (dot_radii is not None and i < len(dot_radii)) else default_dot_radius
+
+        draw.ellipse( [cx - r, cy - r, cx + r, cy + r],fill=color)
+
+    return canvas
+
+"""Raw image fallback: neutral gray dots."""
+def construct_dot_raw_img(
+    coords: np.ndarray, patch_size: int = 512
+) -> Image.Image:
+    
+    return _render_dot_canvas(coords, default_color=(128, 128, 128), patch_size=patch_size)
+
+"""Label image fallback: gray dots for 0, RED dots for 1."""
+def construct_dot_lab_img(
+    coords: np.ndarray, y_inst: np.ndarray, patch_size: int = 512
+) -> Image.Image:
+    y_inst = np.asarray(y_inst).reshape(-1)
+
+    # Match length with coords
+    if len(y_inst) < len(coords):
+        y_inst = np.pad(y_inst, (0, len(coords) - len(y_inst)), mode="constant")
+    elif len(y_inst) > len(coords):
+        y_inst = y_inst[: len(coords)]
+
+    colors = [(255, 0, 0) if y == 1 else (180, 180, 180) for y in y_inst]
+    return _render_dot_canvas(coords, point_colors=colors, patch_size=patch_size)
+
+"""Heatmap fallback: Aggressive scaling and percentile clipping for sparse MIL attention."""
+def construct_dot_attn_heatmap(
+    coords: np.ndarray,
+    attn_weights: np.ndarray,
+    patch_size: int = 512,
+    cmap_name: str = "jet",
+) -> Image.Image:
+    attn_weights = np.asarray(attn_weights, dtype=np.float32).reshape(-1)
+
+    # Align length with coords
+    if len(attn_weights) < len(coords):
+        attn_weights = np.pad(attn_weights, (0, len(coords) - len(attn_weights)), mode="constant")
+    elif len(attn_weights) > len(coords):
+        attn_weights = attn_weights[: len(coords)]
+
+    # Clip the top 0.5% extreme outliers so the colormap isn't squashed by a single patch
+    min_val = np.min(attn_weights)
+    p_max = np.percentile(attn_weights, 99.5) 
+    
+    attn_clipped = np.clip(attn_weights, min_val, p_max)
+
+    if p_max - min_val > 1e-8:
+        norm_attn = (attn_clipped - min_val) / (p_max - min_val)
+        # Gamma = 0.2 pulls low-tier attention values up into the visible range (cyan/yellow)
+        norm_attn = np.power(norm_attn, 0.2)  
+    else:
+        norm_attn = np.zeros_like(attn_weights)
+
+    colormap = plt.get_cmap(cmap_name)
+    rgba_colors = colormap(norm_attn)
+    colors = [(int(r * 255), int(g * 255), int(b * 255)) for r, g, b, _ in rgba_colors]
+
+    # Background dots = 2px (less cluttered), Top attention dots = up to 14px (highly visible)
+    radii = [int(2 + 12 * val) for val in norm_attn]
+
+    return _render_dot_canvas_variable(
+        coords=coords, 
+        point_colors=colors, 
+        dot_radii=radii, 
+        patch_size=patch_size,
+        default_dot_radius=2
+    )
+
 """Plot image"""
 def plot_img(slide_id, raw_img, lab_img, attn_img, attn_np, gt_lab, pre_lab):
-    # Plot side-by-side comparison
     fig, axes = plt.subplots(1, 3, figsize=(10, 6))
     fig.suptitle(f"Slide ID: {slide_id}", fontsize=14, y=0.98)
+    
     axes[0].imshow(raw_img)
-    axes[0].set_title(f"Raw Image")
+    axes[0].set_title("Raw Image")
+    
     axes[1].imshow(lab_img)
     axes[1].set_title(f"Labeled Image: {gt_lab}")
+    
     axes[2].imshow(attn_img)
-    axes[2].set_title(f"Prediction: {pre_lab}")
+    axes[2].set_title(f"Pred: {pre_lab}") 
 
     axes[0].set_xticks([])
     axes[0].set_yticks([])
@@ -253,15 +335,15 @@ def plot_img(slide_id, raw_img, lab_img, attn_img, attn_np, gt_lab, pre_lab):
     for spine in axes[0].spines.values():
         spine.set_edgecolor('black')
         spine.set_linewidth(1)
-        spine.set_visible(True)  # Set to False to hide
+        spine.set_visible(True)
     for spine in axes[1].spines.values():
         spine.set_edgecolor('black')
         spine.set_linewidth(1)
-        spine.set_visible(True)  # Set to False to hide
+        spine.set_visible(True)
     for spine in axes[2].spines.values():
         spine.set_edgecolor('black')
         spine.set_linewidth(1)
-        spine.set_visible(True)  # Set to False to hide
+        spine.set_visible(True)
 
     # Add Colorbar for Attention intensity
     sm = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=np.min(attn_np), vmax=np.max(attn_np)))
@@ -276,64 +358,84 @@ def plot_img(slide_id, raw_img, lab_img, attn_img, attn_np, gt_lab, pre_lab):
 """Main function"""
 def main(args):
     # Load dataset
-    dataset = SlideDataset(root_dir= args.dataset_root_dir, dataset_name= args.datasets)
+    dataset = data_utils.SlideDataset(root_dir= args.dataset_root_dir, dataset_name= args.datasets)
     lmdb_path = f"{args.dataset_root_dir}/{args.datasets}/{args.datasets}.lmdb"
     lmdb_path = lmdb_path if os.path.exists(lmdb_path) else None
 
     # Initialize data loader for model inference 
-    train_loader, val_loader, test_loader = build_dataloader(args= args, image_input= args.image_input)
+    train_loader, val_loader, test_loader = build_dataloader(args= args, image_input= args.image_input, inference= True)
     print(f"[Dataloader] Train: {len(train_loader)} Val: {len(val_loader)} Test: {len(test_loader)}")
 
     # Create and define model save directory
     output_base_dir = os.path.join(args.output_path, args.title)
     best_pt_path = os.path.join(output_base_dir, 'model_best.pt')
+    
     # Initialize mil model
-    model= build_model(args= args, device= args.device, enc_name= args.enc_name, mil_name= args.mil_name, hf_token= args.hf_token, image_input= args.image_input)
+    model = build_model(args= args, device= args.device, enc_name= args.enc_name, mil_name= args.mil_name, hf_token= args.hf_token, image_input= args.image_input)
     if args.pretrained_path:
         pretrained_pt_path = args.pretrained_path
     else:
         pretrained_pt_path = best_pt_path
+        
     # Check model path existence
     if not os.path.exists(pretrained_pt_path) or not pretrained_pt_path.endswith(".pt"):
         raise Exception(f"[Pretrained Error] Pretrained model path {pretrained_pt_path} does not exist for validation")
+        
     # Load the saved trained best model
     pretrained_pt = torch.load(pretrained_pt_path, map_location= args.device, weights_only=True)
     model.load_state_dict(pretrained_pt.get('model'))
     print(f"[Model] Loaded best model saved at epoch {pretrained_pt.get('epoch')} from {pretrained_pt_path} for test dataset evaluation")
 
-    # Lmdb is none if not lmdb file found
-    if lmdb_path:
-        # Load lmdb file
-        env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False,readahead=False, meminit=False)
-        with env.begin(write=False, buffers=True) as txn:
-            for slide_id, feat, lab, y_inst, coords in tqdm(dataset):
-                # Get target sample from dataset loader
-                sample = get_sample(loader= train_loader, slide_id= slide_id)
-                if sample: # make sure sample is not none
-                    # Load patch images
-                    patches_imgs = load_slide_patches(txn=txn, slide_id= slide_id, patch_count= len(coords), thumbnail_size= 96)
-                    # Construct raw image
-                    raw_img = construct_img(coords= coords, patches_imgs= patches_imgs)
-                    # Ground-truth image with label
-                    lab_img = construct_img_label(coords= coords, patches_imgs= patches_imgs, y_inst= y_inst)
-                    # Run model inference
-                    logits, attn = model(sample['input'],  return_attn= True)
-                    logits = logits[0] if 'dsmil' in args.mil_name else logits # Adjust output format for DS-MIL
-                    pre_lab = torch.argmax(logits, dim= 1).item()
+    # Open LMDB environment if available
+    env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False, readahead=False, meminit=False) if lmdb_path else None
 
-                    # Convert attention tensor to 1D NumPy array safely
-                    attn_np = attn.detach().cpu().numpy()
-                    if attn_np.ndim > 1:
-                        # Handle multi-class attention: select attention corresponding to predicted class
-                        if attn_np.shape[0] > 1 and attn_np.ndim == 2:
-                            attn_np = attn_np[pre_lab]
-                        attn_np = np.squeeze(attn_np)
-                    # Heatmap image
-                    attn_img = construct_attn_heatmap(
-                        coords= coords,attn_weights= attn_np,patches_imgs= patches_imgs,raw_img= raw_img)
-                    # Plot side-by-side comparison
-                    plot_img(slide_id= slide_id, raw_img= raw_img,lab_img= lab_img,attn_img= attn_img,attn_np= attn_np,gt_lab= lab,pre_lab= pre_lab)
-                    
+    try:
+        for slide_id, feat, lab, y_inst, coords in tqdm(dataset):
+            # Bypass dataloader for perfect coordinate alignment
+            feat = feat.to(args.device)
+            if feat.ndim == 2:
+                feat = feat.unsqueeze(0) 
+                
+            logits, attn = model(feat, return_attn=True)
+            logits = logits[0] if 'dsmil' in args.mil_name else logits
+            pre_lab = torch.argmax(logits, dim=1).item()
+            gt_idx = lab.item()
+
+            # Multi-class attention distribution
+            attn_np = attn.detach().cpu().numpy()
+            attn_np = np.squeeze(attn_np) 
+            
+            # If the array is 2D, we have multi-branch attention
+            if attn_np.ndim == 2:
+                # Verify the output matches your expected number of classes
+                if attn_np.shape[0] == args.n_classes:
+                    # Select the attention branch corresponding to the GROUND-TRUTH class
+                    branch_idx = min(gt_idx, args.n_classes - 1)
+                    attn_np = attn_np[branch_idx]
+                else:
+                    # Fallback for unexpected shapes (e.g., intermediate tensor outputs)
+                    attn_np = attn_np[0]
+            
+            # Generate image plots (LMDB vs Fallback Dot mode)
+            if env is not None:
+                with env.begin(write=False, buffers=True) as txn:
+                    patches_imgs = load_slide_patches(txn=txn, slide_id=slide_id, patch_count=len(coords), thumbnail_size=96)
+                    raw_img = construct_img(coords=coords, patches_imgs=patches_imgs)
+                    lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst)
+                    attn_img = construct_attn_heatmap(coords=coords, attn_weights=attn_np, patches_imgs=patches_imgs, raw_img=raw_img)
+            else:
+                # LMDB not found -> Render dot-based canvas visuals
+                raw_img = construct_dot_raw_img(coords=coords)
+                lab_img = construct_dot_lab_img(coords=coords, y_inst=y_inst)
+                attn_img = construct_dot_attn_heatmap(coords=coords, attn_weights=attn_np)
+
+            # Plot side-by-side comparison
+            plot_img(slide_id=slide_id, raw_img=raw_img, lab_img=lab_img, attn_img=attn_img, attn_np=attn_np, gt_lab=lab, pre_lab=pre_lab)
+            
+    finally:
+        if env is not None:
+            env.close()
+
 if __name__ == "__main__":
     args = get_parse_args()
     main(args= args)
