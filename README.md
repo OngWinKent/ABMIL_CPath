@@ -86,14 +86,14 @@ For feature-input experiments, the chosen encoder must have a matching pre-extra
 
 Select the aggregation model with `--mil_name`.
 
-| MIL argument | Paper | Reference implementation |
+| MIL argument | Paper | Original Github Repository |
 | --- | --- | --- |
-| `abmil` | Attention-based Deep Multiple Instance Learning | [AttentionDeepMIL](https://github.com/AMLab-Amsterdam/AttentionDeepMIL) |
-| `rrtmil` | Feature Re-Embedding: Towards Foundation Model-Level Performance in Computational Pathology | [RRT-MIL](https://github.com/DearCaat/RRT-MIL) |
-| `transmil` | TransMIL: Transformer-based Correlated Multiple Instance Learning for Whole Slide Image Classification | [TransMIL](https://github.com/szc19990412/TransMIL) |
-| `dsmil` | Dual-Stream Multiple Instance Learning Network for Whole Slide Image Classification with Self-Supervised Contrastive Learning | [dsmil-wsi](https://github.com/binli123/dsmil-wsi) |
-| `wikg` | Dynamic Graph Representation with Knowledge-Aware Attention for Histopathology Whole Slide Image Analysis | [WiKG](https://github.com/WonderLandxD/WiKG) |
-| `abmilx` | Revisiting End-to-End Learning with Slide-Level Supervision in Computational Pathology | [E2E-WSI-ABMILX](https://github.com/DearCaat/E2E-WSI-ABMILX) |
+| `abmil` | [Attention-based Deep Multiple Instance Learning](https://arxiv.org/pdf/1802.04712) | [AttentionDeepMIL](https://github.com/AMLab-Amsterdam/AttentionDeepMIL) |
+| `rrtmil` | [Feature Re-Embedding: Towards Foundation Model-Level Performance in Computational Pathology](https://arxiv.org/pdf/2106.00908) | [RRT-MIL](https://github.com/DearCaat/RRT-MIL) |
+| `transmil` | [TransMIL: Transformer-based Correlated Multiple Instance Learning for Whole Slide Image Classification](https://arxiv.org/pdf/2106.00908) | [TransMIL](https://github.com/szc19990412/TransMIL) |
+| `dsmil` | [Dual-Stream Multiple Instance Learning Network for Whole Slide Image Classification with Self-Supervised Contrastive Learning](https://arxiv.org/pdf/2011.08939) | [dsmil-wsi](https://github.com/binli123/dsmil-wsi) |
+| `wikg` | [Dynamic Graph Representation with Knowledge-Aware Attention for Histopathology Whole Slide Image Analysis](https://arxiv.org/pdf/2403.07719) | [WiKG](https://github.com/WonderLandxD/WiKG) |
+| `abmilx` | [Revisiting End-to-End Learning with Slide-Level Supervision in Computational Pathology](https://arxiv.org/pdf/2506.02408) | [E2E-WSI-ABMILX](https://github.com/DearCaat/E2E-WSI-ABMILX) |
 
 Sincere appreciation to the authors of these popular abmil algorithms for open-sourcing their code, greatly contributing to the success of this repository.
 
