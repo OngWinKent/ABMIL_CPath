@@ -53,7 +53,7 @@ data/
 │   ├── panda.lmdb
 │   └── {r18,r50,chief,uni,gigap}/
 └── brca/
-    ├── subtyping_tcga_brca_resample.csv
+    ├── brca.csv
     ├── brca.lmdb
     └── {r18,r50,chief,uni,gigap}/
 ```
