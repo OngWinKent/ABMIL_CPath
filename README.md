@@ -74,11 +74,11 @@ Select the feature encoder with `--enc_name`.
 
 | Encoder argument | Encoder architecture |
 | --- | --- |
-| `r18` | ResNet-18 |
-| `r50` | ResNet-50 |
-| `chief` | CHIEF |
-| `uni` | UNI |
-| `gigap` | GigaPath |
+| `r18` | [ResNet-18](https://arxiv.org/abs/1512.03385) |
+| `r50` | [ResNet-50](https://arxiv.org/abs/1512.03385) |
+| `chief` | [CHIEF](https://github.com/hms-dbmi/CHIEF) |
+| `uni` | [UNI](https://huggingface.co/MahmoodLab/UNI) |
+| `gigap` | [GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) |
 
 For feature-input experiments, the chosen encoder must have a matching pre-extracted-feature directory. Foundation-model encoders may require access credentials from their respective model providers.
 
@@ -240,6 +240,7 @@ This work builds on:
 
 
 - Tang et al. (2025). *Revisiting End-to-End Learning with Slide-level Supervision in Computational Pathology*. [arXiv:2506.02408](https://arxiv.org/pdf/2506.02408).
+
 
 
 ## License and Copyright
