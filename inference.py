@@ -16,7 +16,53 @@ from datasets import build_dataloader
 from modules import build_model
 import matplotlib.pyplot as plt
 from datasets import data_utils
+import cv2
 
+"""Plot image"""
+def plot_img(slide_id, raw_img, lab_img, attn_img, attn_np, gt_lab, pre_lab):
+    fig, axes = plt.subplots(1, 3, figsize=(10, 6))
+    fig.suptitle(f"Slide ID: {slide_id}", fontsize=14, y=0.98)
+    
+    axes[0].imshow(raw_img)
+    axes[0].set_title("Raw Image")
+    
+    axes[1].imshow(lab_img)
+    axes[1].set_title(f"Labeled Image: {gt_lab}")
+    
+    axes[2].imshow(attn_img)
+    axes[2].set_title(f"Pred: {pre_lab}") 
+
+    axes[0].set_xticks([])
+    axes[0].set_yticks([])
+    axes[1].set_xticks([])
+    axes[1].set_yticks([])
+    axes[2].set_xticks([])
+    axes[2].set_yticks([])
+
+    for spine in axes[0].spines.values():
+        spine.set_edgecolor('black')
+        spine.set_linewidth(1)
+        spine.set_visible(True)
+    for spine in axes[1].spines.values():
+        spine.set_edgecolor('black')
+        spine.set_linewidth(1)
+        spine.set_visible(True)
+    for spine in axes[2].spines.values():
+        spine.set_edgecolor('black')
+        spine.set_linewidth(1)
+        spine.set_visible(True)
+
+    # Add Colorbar for Attention intensity
+    sm = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=np.min(attn_np), vmax=np.max(attn_np)))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=axes[2], fraction=0.046, pad=0.04)
+    cbar.ax.set_title("Attn", fontsize=9)
+
+    plt.tight_layout()
+    plt.show()
+    plt.close()
+
+# Lmdb visualization
 """Load every patch belonging to one slide from LMDB."""
 def load_slide_patches(txn: lmdb.Transaction, slide_id: str, patch_count: int, thumbnail_size: int = 0) -> list[Image.Image]:
     patches = []
@@ -72,36 +118,62 @@ def construct_img(coords: np.ndarray, patches_imgs: list[Image.Image], patch_siz
     return canvas
 
 """Reconstructs WSI showing ONLY patches with positive instance labels (y_inst == 1)."""
-def construct_img_label(coords: np.ndarray, patches_imgs: list[Image.Image], y_inst: np.ndarray, patch_size: int = 512) -> Image.Image:
-    if len(coords) != len(patches_imgs) or len(coords) != len(y_inst):
-        raise ValueError("coords, patches_imgs, and y_inst must all have the same length.")
-    bg_color: tuple = (255, 255, 255)
-    patch_w, patch_h = patches_imgs[0].size
-    max_x, max_y = np.max(coords, axis=0)
+def construct_img_label(
+    coords: np.ndarray,
+    patches_imgs: list[Image.Image],
+    y_inst: np.ndarray,
+    patch_size: int = 512,
+    contour_color: tuple = (255, 0, 0),  # RGB format (Red)
+    contour_thickness: int = 4,
+) -> Image.Image:
+  """Reconstructs WSI showing ALL patches, drawing a unified outer boundary around contiguous regions with label == 1."""
+  if len(coords) != len(patches_imgs) or len(coords) != len(y_inst):
+    raise ValueError(
+        "coords, patches_imgs, and y_inst must all have the same length."
+    )
 
-    # Calculate coordinate scaling
-    if max_x > 100 or max_y > 100:
-        scale_x = patch_w / patch_size
-        scale_y = patch_h / patch_size
-    else:
-        scale_x = patch_w
-        scale_y = patch_h
+  bg_color: tuple = (255, 255, 255)
+  patch_w, patch_h = patches_imgs[0].size
+  max_x, max_y = np.max(coords, axis=0)
 
-    # Calculate overall canvas bounds
-    canvas_w = int(np.round((max_x * scale_x) + patch_w))
-    canvas_h = int(np.round((max_y * scale_y) + patch_h))
+  # Calculate coordinate scaling
+  if max_x > 100 or max_y > 100:
+    scale_x = patch_w / patch_size
+    scale_y = patch_h / patch_size
+  else:
+    scale_x = patch_w
+    scale_y = patch_h
 
-    # Create a blank background image
-    canvas = Image.new("RGB", (canvas_w, canvas_h), color=bg_color)
+  # Calculate overall canvas bounds
+  canvas_w = int(np.round((max_x * scale_x) + patch_w))
+  canvas_h = int(np.round((max_y * scale_y) + patch_h))
 
-    # Paste ONLY patches with y_inst == 1
-    for (x, y), patch, label in zip(coords, patches_imgs, y_inst):
-        if label == 1:
-            pos_x = int(np.round(x * scale_x))
-            pos_y = int(np.round(y * scale_y))
-            canvas.paste(patch, (pos_x, pos_y))
+  # Create blank canvas and binary mask for positive regions
+  canvas = Image.new("RGB", (canvas_w, canvas_h), color=bg_color)
+  mask = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
-    return canvas
+  # Step 1: Paste all patches and build the binary mask for label == 1
+  for (x, y), patch, label in zip(coords, patches_imgs, y_inst):
+    pos_x = int(np.round(x * scale_x))
+    pos_y = int(np.round(y * scale_y))
+
+    # Paste every patch onto the canvas
+    canvas.paste(patch, (pos_x, pos_y))
+
+    # Mark positive regions on the mask
+    if label == 1:
+      mask[pos_y : pos_y + patch_h, pos_x : pos_x + patch_w] = 255
+
+  # Extract external contours using OpenCV
+  contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+  # Draw outer boundaries on the final image
+  canvas_np = np.array(canvas)
+
+  # Convert RGB to BGR for OpenCV drawing (OpenCV works in BGR format)
+  cv2.drawContours(canvas_np, contours, -1, contour_color, thickness=contour_thickness)
+
+  return Image.fromarray(canvas_np)
 
 """Attention heatmap visualization"""
 def construct_attn_heatmap(
@@ -109,17 +181,31 @@ def construct_attn_heatmap(
     attn_weights: np.ndarray,
     patches_imgs: list[Image.Image],
     raw_img: Image.Image,
+    is_clip_weights: bool= True,
     patch_size: int = 512,
     cmap_name: str = "jet",
     alpha: float = 0.5
 ) -> Image.Image:
     # Normalize attention weights to [0, 1]
     attn_weights = np.squeeze(attn_weights).astype(np.float32)
-    min_val, max_val = np.min(attn_weights), np.max(attn_weights)
-    if max_val - min_val > 1e-8:
-        norm_attn = (attn_weights - min_val) / (max_val - min_val)
+
+    # Clip weight for better visualization 
+    if is_clip_weights:
+        min_val = np.min(attn_weights)
+        p_max = np.percentile(attn_weights, 99.5) # Clip the top 0.5% extreme outliers so the colormap isn't squashed by a single patch
+        attn_clipped = np.clip(attn_weights, min_val, p_max)
+        if p_max - min_val > 1e-8:
+            norm_attn = (attn_clipped - min_val) / (p_max - min_val)
+            norm_attn = np.power(norm_attn, 0.2)  # Gamma = 0.2 pulls low-tier attention values up into the visible range (cyan/yellow)
+        else:
+            norm_attn = np.zeros_like(attn_weights)
+    # Raw weight visualization
     else:
-        norm_attn = np.zeros_like(attn_weights)
+        min_val, max_val = np.min(attn_weights), np.max(attn_weights)
+        if max_val - min_val > 1e-8:
+            norm_attn = (attn_weights - min_val) / (max_val - min_val)
+        else:
+            norm_attn = np.zeros_like(attn_weights)
 
     # Get patch dimensions and scaling factors
     patch_w, patch_h = patches_imgs[0].size
@@ -154,12 +240,11 @@ def construct_attn_heatmap(
     # Alpha blend heatmap over raw image ONLY on tissue patches
     raw_arr = np.array(raw_img)
     blended_arr = raw_arr.copy()
-    blended_arr[tissue_mask] = (
-        (1 - alpha) * raw_arr[tissue_mask] + alpha * heatmap_rgb[tissue_mask]
-    ).astype(np.uint8)
+    blended_arr[tissue_mask] = ((1 - alpha) * raw_arr[tissue_mask] + alpha * heatmap_rgb[tissue_mask]).astype(np.uint8)
 
     return Image.fromarray(blended_arr)
 
+# ---------------- Dot visualization ---------
 """Helper to render dots onto a PIL Image canvas based on coordinates."""
 def _render_dot_canvas(
     coords: np.ndarray,
@@ -286,9 +371,7 @@ def construct_dot_attn_heatmap(
     # Clip the top 0.5% extreme outliers so the colormap isn't squashed by a single patch
     min_val = np.min(attn_weights)
     p_max = np.percentile(attn_weights, 99.5) 
-    
     attn_clipped = np.clip(attn_weights, min_val, p_max)
-
     if p_max - min_val > 1e-8:
         norm_attn = (attn_clipped - min_val) / (p_max - min_val)
         # Gamma = 0.2 pulls low-tier attention values up into the visible range (cyan/yellow)
@@ -311,56 +394,16 @@ def construct_dot_attn_heatmap(
         default_dot_radius=2
     )
 
-"""Plot image"""
-def plot_img(slide_id, raw_img, lab_img, attn_img, attn_np, gt_lab, pre_lab):
-    fig, axes = plt.subplots(1, 3, figsize=(10, 6))
-    fig.suptitle(f"Slide ID: {slide_id}", fontsize=14, y=0.98)
-    
-    axes[0].imshow(raw_img)
-    axes[0].set_title("Raw Image")
-    
-    axes[1].imshow(lab_img)
-    axes[1].set_title(f"Labeled Image: {gt_lab}")
-    
-    axes[2].imshow(attn_img)
-    axes[2].set_title(f"Pred: {pre_lab}") 
-
-    axes[0].set_xticks([])
-    axes[0].set_yticks([])
-    axes[1].set_xticks([])
-    axes[1].set_yticks([])
-    axes[2].set_xticks([])
-    axes[2].set_yticks([])
-
-    for spine in axes[0].spines.values():
-        spine.set_edgecolor('black')
-        spine.set_linewidth(1)
-        spine.set_visible(True)
-    for spine in axes[1].spines.values():
-        spine.set_edgecolor('black')
-        spine.set_linewidth(1)
-        spine.set_visible(True)
-    for spine in axes[2].spines.values():
-        spine.set_edgecolor('black')
-        spine.set_linewidth(1)
-        spine.set_visible(True)
-
-    # Add Colorbar for Attention intensity
-    sm = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=np.min(attn_np), vmax=np.max(attn_np)))
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=axes[2], fraction=0.046, pad=0.04)
-    cbar.ax.set_title("Attn", fontsize=9)
-
-    plt.tight_layout()
-    plt.show()
-    plt.close()
-
 """Main function"""
 def main(args):
     # Load dataset
     dataset = data_utils.SlideDataset(root_dir= args.dataset_root_dir, dataset_name= args.datasets)
+
+    # Path configuration
     lmdb_path = f"{args.dataset_root_dir}/{args.datasets}/{args.datasets}.lmdb"
     lmdb_path = lmdb_path if os.path.exists(lmdb_path) else None
+    raw_img_folder = f"{args.dataset_root_dir}/{args.datasets}/raw_imgs"
+    raw_img_folder = raw_img_folder if os.path.isdir(raw_img_folder) else None
 
     # Initialize data loader for model inference 
     train_loader, val_loader, test_loader = build_dataloader(args= args, image_input= args.image_input, inference= True)
@@ -403,7 +446,7 @@ def main(args):
 
             # Multi-class attention distribution
             attn_np = attn.detach().cpu().numpy()
-            attn_np = np.squeeze(attn_np) 
+            attn_np = np.squeeze(attn_np) # Flatten attention weights
             
             # If the array is 2D, we have multi-branch attention
             if attn_np.ndim == 2:
@@ -416,15 +459,16 @@ def main(args):
                     # Fallback for unexpected shapes (e.g., intermediate tensor outputs)
                     attn_np = attn_np[0]
             
-            # Generate image plots (LMDB vs Fallback Dot mode)
-            if env is not None:
+            # Generate image plots
+            if env is not None: # Draw with encoded image from lmdb
                 with env.begin(write=False, buffers=True) as txn:
-                    patches_imgs = load_slide_patches(txn=txn, slide_id=slide_id, patch_count=len(coords), thumbnail_size=96)
+                    patches_imgs = load_slide_patches(txn=txn, slide_id=slide_id, patch_count=len(coords), thumbnail_size=96) # raw patches images in tiles
                     raw_img = construct_img(coords=coords, patches_imgs=patches_imgs)
-                    lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst)
-                    attn_img = construct_attn_heatmap(coords=coords, attn_weights=attn_np, patches_imgs=patches_imgs, raw_img=raw_img)
-            else:
-                # LMDB not found -> Render dot-based canvas visuals
+                    lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst, contour_thickness= 15, contour_color= (0, 255, 0))
+                    attn_img = construct_attn_heatmap(coords=coords, attn_weights=attn_np, patches_imgs=patches_imgs, raw_img=raw_img, is_clip_weights= True)
+            
+            # Dot plots
+            else: 
                 raw_img = construct_dot_raw_img(coords=coords)
                 lab_img = construct_dot_lab_img(coords=coords, y_inst=y_inst)
                 attn_img = construct_dot_attn_heatmap(coords=coords, attn_weights=attn_np)
@@ -434,7 +478,7 @@ def main(args):
             
     finally:
         if env is not None:
-            env.close()
+            env.close()  
 
 if __name__ == "__main__":
     args = get_parse_args()
