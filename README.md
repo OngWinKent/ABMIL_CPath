@@ -49,7 +49,10 @@ data_root/
 │   ├── slide_001.tif
 │   ├── slide_002.tif
 │   └── slide_003.tif
-│
+|
+├── presets/                         
+│   ├── tcga.csv 
+|
 ├── results_h5/                         <-- YOUR_RESULTS_DIRECTORY & H5_PATCHES_DIRECTORY
 │   ├── patches/                         (Auto-created by Step 1: .h5 coordinate files)
 │   │   ├── slide_001.h5
@@ -75,7 +78,7 @@ python CLAM/create_patches_fp.py `
   --patch_size 256 `
   --step_size 256 `
   --patch_level 1 `
-  --preset ./CLAM/presets/tcga.csv `
+  --preset data_root/presets/tcga.csv `
   --seg `
   --patch
 ```
