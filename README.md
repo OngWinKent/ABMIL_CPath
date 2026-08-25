@@ -32,6 +32,88 @@ conda activate abmil_env
 pip install -r requirements.txt
 ```
 
+## Raw image preprocessing
+
+Use the CLAM utilities to turn raw whole-slide images (WSIs) into fixed-size RGB
+tiles stored in an LMDB database. Run these commands from the project root. The
+examples below use PowerShell line continuations (`` ` ``); on macOS/Linux,
+replace each backtick with `\\`.
+
+Arrange the input and generated-output directories as follows. `patches`,
+`masks`, `stitches`, and `process_list_autogen.csv` are created during Step 1;
+the LMDB directory and database are created during Step 2.
+
+```text
+data_root/
+├── raw_slides/                         <-- YOUR_DATA_DIRECTORY & WSI_DIRECTORY
+│   ├── slide_001.tif
+│   ├── slide_002.tif
+│   └── slide_003.tif
+│
+├── results_h5/                         <-- YOUR_RESULTS_DIRECTORY & H5_PATCHES_DIRECTORY
+│   ├── patches/                         (Auto-created by Step 1: .h5 coordinate files)
+│   │   ├── slide_001.h5
+│   │   └── slide_002.h5
+│   ├── masks/                           (Auto-created: binary tissue-segmentation masks)
+│   ├── stitches/                        (Auto-created: patch thumbnail previews)
+│   └── process_list_autogen.csv         (Auto-created: slide processing status)
+│
+└── lmdb_patches/                        <-- LMDB_OUTPUT_DIRECTORY
+    └── camelyon16.lmdb                  (Auto-created by Step 2: extracted RGB tiles)
+```
+
+### Step 1: Segment tissue and generate tile coordinates
+
+This finds tissue regions in each `.tif` slide and writes the tile coordinates
+to HDF5 files. With `--patch_size 256`, `--step_size 256`, and
+`--patch_level 1`, it produces non-overlapping 256 × 256 tiles at WSI level 1.
+
+```powershell
+python CLAM/create_patches_fp.py `
+  --source data_root/raw_slides `
+  --save_dir data_root/results_h5 `
+  --patch_size 256 `
+  --step_size 256 `
+  --patch_level 1 `
+  --preset ./CLAM/presets/tcga.csv `
+  --seg `
+  --patch
+```
+
+### Step 2: Extract tiles and build the LMDB database
+
+This reads the Step 1 coordinates, extracts the RGB tiles from the original
+slides, and saves them to `camelyon16.lmdb`.
+
+```powershell
+python CLAM/save_patches.py `
+  --data_h5_dir data_root/results_h5 `
+  --data_slide_dir data_root/raw_slides `
+  --csv_path data_root/results_h5/process_list_autogen.csv `
+  --patch_dir data_root/lmdb_patches `
+  --batch_size 1024 `
+  --slide_ext .tif `
+  --save_lmdb `
+  --img_size 256 `
+  --lmdb_name camelyon16 `
+  --workers 0
+```
+
+### Step 3: Compact or relocate the LMDB database
+
+Optionally compact the generated database while copying it to its final
+location. Create the destination directory first if it does not already exist.
+
+```powershell
+python CLAM/lmdb_compact.py `
+  --src_lmdb_path data_root/lmdb_patches/camelyon16.lmdb `
+  --target_lmdb_path ./data/camelyon16/camelyon16.lmdb
+```
+
+The compact script uses `--target_lmdb_path` (not `--target_lmdb_parh`). Point
+`--dataset_root_dir` at the parent directory that contains the final
+dataset folder when training with `--image_input`.
+
 ## Prepare the processed datasets
 
 Download the processed datasets from [Hugging Face: `kent1122/ComputationalPathology`](https://huggingface.co/datasets/kent1122/ComputationalPathology/tree/main). You may download the files from the web interface, or use the Hugging Face CLI:
