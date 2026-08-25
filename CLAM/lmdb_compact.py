@@ -2,10 +2,8 @@ import lmdb
 import argparse
 
 parser = argparse.ArgumentParser(description="Compact LMDB Scripts")
-parser.add_argument("--src_lmdb_path",type= str, default= "C:/Users/USER/Downloads/test_camelyon/lmdb_patches/camelyon16.lmdb", help="The person's name")
-parser.add_argument("--target_lmdb_path",type= str, default= "C:/Datasets/DatasetMil/CPath/camelyon16/camelyon16.lmdb", help="The person's name")
-parser.add_argument("--age", type=int, help="The person's age")
-
+parser.add_argument("--src_lmdb_path",type= str, help= "Source .lmdb path")
+parser.add_argument("--target_lmdb_path",type= str, default= "Target .lmdb path")
 args = parser.parse_args()
 
 if __name__ == "__main__":
