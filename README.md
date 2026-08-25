@@ -295,6 +295,8 @@ The third panel below overlays the predicted-class attention scores on the recon
 
 <img src="./figures/panda_heatmap1.png" alt="PANDA slide with raw image, ground-truth label, and attention heatmap" width="100%">
 
+<img src="./figures/panda_heatmap2.png" alt="PANDA slide with raw image, ground-truth label, and attention heatmap" width="100%">
+
 Training checkpoints are written under `<output_path>/image/` for image-input runs and `<output_path>/feature/` for feature-input runs. The full directory name is automatically derived from the selected dataset, encoder, MIL method, epoch count, and frozen-encoder setting.
 
 ## Citation and acknowledgements
