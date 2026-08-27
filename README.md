@@ -68,16 +68,16 @@ data_root/
 ### Step 1: Segment tissue and generate tile coordinates
 
 This finds tissue regions in each `.tif` slide and writes the tile coordinates
-to HDF5 files. With `--patch_size 256`, `--step_size 256`, and
-`--patch_level 1`, it produces non-overlapping 256 × 256 tiles at WSI level 1.
+to HDF5 files. With `--patch_size 512`, `--step_size 512`, and
+`--patch_level 1`, it produces non-overlapping 512 × 512 tiles at WSI level 0.
 
 ```powershell
 python CLAM/create_patches_fp.py `
   --source data_root/raw_slides `
   --save_dir data_root/results_h5 `
-  --patch_size 256 `
-  --step_size 256 `
-  --patch_level 1 `
+  --patch_size 512 `
+  --step_size 512 `
+  --patch_level 0 `
   --preset data_root/presets/tcga.csv `
   --seg `
   --patch
@@ -97,7 +97,7 @@ python CLAM/save_patches.py `
   --batch_size 1024 `
   --slide_ext .tif `
   --save_lmdb `
-  --img_size 256 `
+  --img_size 512 `
   --lmdb_name camelyon16 `
   --workers 0
 ```
@@ -289,13 +289,17 @@ python inference.py `
 
 Each result opens as an interactive Matplotlib window. Close the current window to continue to the next slide. Use the same model arguments used for training so the checkpoint architecture matches.
 
-### Example: PANDA attention heatmap
+The third panel below overlays the predicted-class attention scores on the reconstructed wsi from compacted .lmdb format. Warmer colors indicate higher attention weights.
 
-The third panel below overlays the predicted-class attention scores on the reconstructed PANDA slide. Warmer colors indicate higher attention weights.
+### Example: PANDA attention heatmap
 
 <img src="./figures/panda_heatmap1.png" alt="PANDA slide with raw image, ground-truth label, and attention heatmap" width="100%">
 
 <img src="./figures/panda_heatmap2.png" alt="PANDA slide with raw image, ground-truth label, and attention heatmap" width="100%">
+
+### Example: Camelyon16 attention heatmap
+
+<img src="./figures/camleyon_heatmap1.png" alt="Camelyon16 slide with raw image, ground-truth label, and attention heatmap" width="100%">
 
 Training checkpoints are written under `<output_path>/image/` for image-input runs and `<output_path>/feature/` for feature-input runs. The full directory name is automatically derived from the selected dataset, encoder, MIL method, epoch count, and frozen-encoder setting.
 
