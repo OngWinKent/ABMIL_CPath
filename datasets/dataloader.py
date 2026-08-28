@@ -11,6 +11,7 @@ def build_dataloader(args, image_input: bool):
     df = get_data_dfs(dataset_name= args.datasets, csv_file= args.csv_path, seed= args.seed, val_ratio= args.val_ratio)
     # Split dataset using split field
     train_dfs, test_dfs, val_dfs = get_split_dfs(df= df)
+
     # Create dataset dictionary
     dataset = { 'train': train_dfs, 'test': test_dfs, 'val': val_dfs}
     if image_input: # Image .lmdb input
@@ -45,7 +46,8 @@ def build_img_loader(args, dataset):
         
     # Get dataset
     train_set = ClsLMDBDataset(args,args.env_train,dataset['train'],persistence=args.persistence,keep_same_psize= args.same_psize, mode="train",_type=args.datasets,channels_last=args.channels_last,img_size=args.img_size, h5_root=args.h5_path)
-    _test_img_size = 224
+    #_test_img_size = 224
+    _test_img_size = args.img_size
     test_set = ClsLMDBDataset(args,args.env,dataset['test'],persistence=args.persistence,_type=args.datasets,channels_last=args.channels_last,mode="test",h5_root=args.h5_path,img_size=_test_img_size)
     val_set = ClsLMDBDataset(args,args.env,dataset['val'],persistence=args.persistence,_type=args.datasets,channels_last=args.channels_last,mode="val",h5_root=args.h5_path,img_size=_test_img_size)
 
