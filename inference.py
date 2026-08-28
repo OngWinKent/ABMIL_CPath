@@ -89,54 +89,59 @@ def construct_img_label(
     y_inst: np.ndarray,
     patch_size: int = 512,
     contour_color: tuple = (255, 0, 0),  # RGB format (Red)
-    contour_thickness: int = 4,
+    #contour_thickness: int = 4,
 ) -> Tuple[Image.Image, Image.Image]:
-  if len(coords) != len(patches_imgs) or len(coords) != len(y_inst):
-    raise ValueError( "coords, patches_imgs, and y_inst must all have the same length." )
+    if len(coords) != len(patches_imgs) or len(coords) != len(y_inst):
+        raise ValueError( "coords, patches_imgs, and y_inst must all have the same length." )
 
-  bg_color: tuple = (255, 255, 255) # White color
-  patch_w, patch_h = patches_imgs[0].size
-  max_x, max_y = np.max(coords, axis=0)
+    min_contour_thickness = 10
+    max_contour_thickness = 100
+    bg_color: tuple = (255, 255, 255) # White color
+    patch_w, patch_h = patches_imgs[0].size
+    max_x, max_y = np.max(coords, axis=0)
 
-  # Calculate coordinate scaling
-  if max_x > 100 or max_y > 100:
-    scale_x = patch_w / patch_size
-    scale_y = patch_h / patch_size
-  else:
-    scale_x = patch_w
-    scale_y = patch_h
+    # Calculate coordinate scaling
+    if max_x > 100 or max_y > 100:
+        scale_x = patch_w / patch_size
+        scale_y = patch_h / patch_size
+    else:
+        scale_x = patch_w
+        scale_y = patch_h
 
-  # Calculate overall canvas bounds
-  canvas_w = int(np.round((max_x * scale_x) + patch_w))
-  canvas_h = int(np.round((max_y * scale_y) + patch_h))
+    # Calculate overall canvas bounds
+    canvas_w = int(np.round((max_x * scale_x) + patch_w))
+    canvas_h = int(np.round((max_y * scale_y) + patch_h))
 
-  # Create blank canvas and binary mask for positive regions
-  canvas = Image.new("RGB", (canvas_w, canvas_h), color=bg_color)
-  mask = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
+    # Create blank canvas and binary mask for positive regions
+    canvas = Image.new("RGB", (canvas_w, canvas_h), color=bg_color)
+    mask = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
-  # Step 1: Paste all patches and build the binary mask for label == 1
-  for (x, y), patch, label in zip(coords, patches_imgs, y_inst):
-    pos_x = int(np.round(x * scale_x))
-    pos_y = int(np.round(y * scale_y))
+    # Step 1: Paste all patches and build the binary mask for label == 1
+    for (x, y), patch, label in zip(coords, patches_imgs, y_inst):
+        pos_x = int(np.round(x * scale_x))
+        pos_y = int(np.round(y * scale_y))
 
-    # Paste every patch onto the canvas
-    canvas.paste(patch, (pos_x, pos_y))
+        # Paste every patch onto the canvas
+        canvas.paste(patch, (pos_x, pos_y))
 
-    # Mark positive regions on the mask
-    if label == 1:
-      mask[pos_y : pos_y + patch_h, pos_x : pos_x + patch_w] = 255
+        # Mark positive regions on the mask
+        if label == 1:
+            mask[pos_y : pos_y + patch_h, pos_x : pos_x + patch_w] = 255
 
-  # Extract external contours using OpenCV
-  contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Extract external contours using OpenCV
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-  # Draw outer boundaries on the final image
-  raw_img = np.array(canvas)
-  labelled_img = copy.deepcopy(raw_img)
+    # Draw outer boundaries on the final image
+    raw_img = np.array(canvas)
+    labelled_img = copy.deepcopy(raw_img)
 
-  # Convert RGB to BGR for OpenCV drawing (OpenCV works in BGR format)
-  cv2.drawContours(labelled_img, contours, -1, contour_color, thickness=contour_thickness)
+    # Dynamic contour thickness computation based on pixel
+    contour_thickness = max(min_contour_thickness, min(int(canvas_h*canvas_w / 1_000_000), max_contour_thickness))
 
-  return Image.fromarray(raw_img), Image.fromarray(labelled_img)
+    # Convert RGB to BGR for OpenCV drawing (OpenCV works in BGR format)
+    cv2.drawContours(labelled_img, contours, -1, contour_color, thickness=contour_thickness)
+
+    return Image.fromarray(raw_img), Image.fromarray(labelled_img)
 
 """Attention heatmap visualization"""
 def construct_attn_heatmap(
@@ -155,20 +160,17 @@ def construct_attn_heatmap(
     # Clip weight for better visualization 
     if is_clip_weights:
         min_val = np.min(attn_weights)
-        p_max = np.percentile(attn_weights, 99.5) # Clip the top 0.5% extreme outliers so the colormap isn't squashed by a single patch
-        attn_clipped = np.clip(attn_weights, min_val, p_max)
-        if p_max - min_val > 1e-8:
-            norm_attn = (attn_clipped - min_val) / (p_max - min_val)
-            norm_attn = np.power(norm_attn, 0.2)  # Gamma = 0.2 pulls low-tier attention values up into the visible range (cyan/yellow)
-        else:
-            norm_attn = np.zeros_like(attn_weights)
+        #max_val = np.percentile(attn_weights, 99.5) # Clip the top 0.5% extreme outliers so the colormap isn't squashed by a single patch
+        max_val = np.percentile(attn_weights, 99) # Clip the top 1% extreme outliers so the colormap isn't squashed by a single patch
+        attn_weights = np.clip(attn_weights, min_val, max_val)
     # Raw weight visualization
     else:
         min_val, max_val = np.min(attn_weights), np.max(attn_weights)
-        if max_val - min_val > 1e-8:
-            norm_attn = (attn_weights - min_val) / (max_val - min_val)
-        else:
-            norm_attn = np.zeros_like(attn_weights)
+    # Normalize attention weights
+    if max_val - min_val > 1e-8:
+        norm_attn = (attn_weights - min_val) / (max_val - min_val)
+    else:
+        norm_attn = np.zeros_like(attn_weights)
 
     # Get patch dimensions and scaling factors
     patch_w, patch_h = patches_imgs[0].size
@@ -376,7 +378,6 @@ def main(args):
         pretrained_pt_path = args.pretrained_path
     else:
         pretrained_pt_path = best_pt_path
-        
     # Check model path existence
     if not os.path.exists(pretrained_pt_path) or not pretrained_pt_path.endswith(".pt"):
         raise Exception(f"[Pretrained Error] Pretrained model path {pretrained_pt_path} does not exist for validation")
@@ -391,11 +392,10 @@ def main(args):
 
     try:
         for slide_id, feat, lab, y_inst, coords in tqdm(dataset):
-            # Bypass dataloader for perfect coordinate alignment
             feat = feat.to(args.device)
             if feat.ndim == 2:
                 feat = feat.unsqueeze(0) 
-                
+            
             logits, attn = model(feat, return_attn=True)
             logits = logits[0] if 'dsmil' in args.mil_name else logits
             pre_lab = torch.argmax(logits, dim=1).item()
@@ -403,8 +403,6 @@ def main(args):
 
             # Multi-class attention distribution
             attn_np = attn.detach().cpu().numpy()
-            attn_np = np.squeeze(attn_np) # Flatten attention weights
-            
             # If the array is 2D, we have multi-branch attention
             if attn_np.ndim == 2:
                 # Verify the output matches your expected number of classes
@@ -415,16 +413,13 @@ def main(args):
                 else:
                     # Fallback for unexpected shapes (e.g., intermediate tensor outputs)
                     attn_np = attn_np[0]
-            
+            attn_np = np.squeeze(attn_np) # Flatten attention weights
+
             # Generate image plots
             if env is not None: # Draw with encoded image from lmdb
                 with env.begin(write=False, buffers=True) as txn:
-                    if args.datasets == "panda":
-                        contour_thickness = 15
-                    else:
-                        contour_thickness = 50
                     patches_imgs = load_slide_patches(txn=txn, slide_id=slide_id, patch_count=len(coords), thumbnail_size=96) # raw patches images in tiles
-                    raw_img, lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst, contour_thickness= contour_thickness, contour_color= (0, 255, 0))
+                    raw_img, lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst, contour_color= (0, 255, 0))
                     attn_img = construct_attn_heatmap(coords=coords, attn_weights=attn_np, patches_imgs=patches_imgs, raw_img=raw_img, is_clip_weights= True)
             # Dot plots
             else: 
