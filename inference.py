@@ -17,6 +17,8 @@ from modules import build_model
 import matplotlib.pyplot as plt
 from datasets import data_utils
 import cv2
+from typing import *
+import copy
 
 """Plot image"""
 def plot_img(slide_id, raw_img, lab_img, attn_img, attn_np, gt_lab, pre_lab):
@@ -80,43 +82,6 @@ def load_slide_patches(txn: lmdb.Transaction, slide_id: str, patch_count: int, t
         patches.append(patch)
     return patches
 
-"""Reconstructs a whole-slide image from patch coordinates and PIL Images"""
-def construct_img(coords: np.ndarray, patches_imgs: list[Image.Image], patch_size: int= 512) -> Image.Image:
-    if len(coords) == 0 or len(patches_imgs) == 0:
-        raise ValueError("coords and patches_imgs must not be empty.")
-        
-    if len(coords) != len(patches_imgs):
-        raise ValueError(f"Mismatch between number of coordinates ({len(coords)}) "
-                         f"and patch images ({len(patches_imgs)}).")
-
-    # Get dimensions of loaded thumbnail patch images
-    patch_w, patch_h = patches_imgs[0].size
-    
-    # Check if coords are in level-0 pixel units (e.g., 0, 512, 1024) or grid indices (e.g., 0, 1, 2)
-    max_x, max_y = np.max(coords, axis=0)
-    
-    if max_x > 100 or max_y > 100:  # Coordinates are level-0 pixel values
-        scale_x = patch_w / patch_size
-        scale_y = patch_h / patch_size
-    else:  # Coordinates are grid indices
-        scale_x = patch_w
-        scale_y = patch_h
-
-    # Calculate overall output canvas size
-    canvas_w = int(np.round((max_x * scale_x) + patch_w))
-    canvas_h = int(np.round((max_y * scale_y) + patch_h))
-
-    # Create empty white background canvas
-    canvas = Image.new("RGB", (canvas_w, canvas_h), color=(255, 255, 255))
-
-    # Paste each patch at its calculated position
-    for (x, y), img in zip(coords, patches_imgs):
-        pos_x = int(np.round(x * scale_x))
-        pos_y = int(np.round(y * scale_y))
-        canvas.paste(img, (pos_x, pos_y))
-
-    return canvas
-
 """Reconstructs WSI showing ONLY patches with positive instance labels (y_inst == 1)."""
 def construct_img_label(
     coords: np.ndarray,
@@ -125,14 +90,11 @@ def construct_img_label(
     patch_size: int = 512,
     contour_color: tuple = (255, 0, 0),  # RGB format (Red)
     contour_thickness: int = 4,
-) -> Image.Image:
-  """Reconstructs WSI showing ALL patches, drawing a unified outer boundary around contiguous regions with label == 1."""
+) -> Tuple[Image.Image, Image.Image]:
   if len(coords) != len(patches_imgs) or len(coords) != len(y_inst):
-    raise ValueError(
-        "coords, patches_imgs, and y_inst must all have the same length."
-    )
+    raise ValueError( "coords, patches_imgs, and y_inst must all have the same length." )
 
-  bg_color: tuple = (255, 255, 255)
+  bg_color: tuple = (255, 255, 255) # White color
   patch_w, patch_h = patches_imgs[0].size
   max_x, max_y = np.max(coords, axis=0)
 
@@ -168,12 +130,13 @@ def construct_img_label(
   contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
   # Draw outer boundaries on the final image
-  canvas_np = np.array(canvas)
+  raw_img = np.array(canvas)
+  labelled_img = copy.deepcopy(raw_img)
 
   # Convert RGB to BGR for OpenCV drawing (OpenCV works in BGR format)
-  cv2.drawContours(canvas_np, contours, -1, contour_color, thickness=contour_thickness)
+  cv2.drawContours(labelled_img, contours, -1, contour_color, thickness=contour_thickness)
 
-  return Image.fromarray(canvas_np)
+  return Image.fromarray(raw_img), Image.fromarray(labelled_img)
 
 """Attention heatmap visualization"""
 def construct_attn_heatmap(
@@ -402,12 +365,6 @@ def main(args):
     # Path configuration
     lmdb_path = f"{args.dataset_root_dir}/{args.datasets}/{args.datasets}.lmdb"
     lmdb_path = lmdb_path if os.path.exists(lmdb_path) else None
-    raw_img_folder = f"{args.dataset_root_dir}/{args.datasets}/raw_imgs"
-    raw_img_folder = raw_img_folder if os.path.isdir(raw_img_folder) else None
-
-    # Initialize data loader for model inference 
-    train_loader, val_loader, test_loader = build_dataloader(args= args, image_input= args.image_input, inference= True)
-    print(f"[Dataloader] Train: {len(train_loader)} Val: {len(val_loader)} Test: {len(test_loader)}")
 
     # Create and define model save directory
     output_base_dir = os.path.join(args.output_path, args.title)
@@ -462,11 +419,13 @@ def main(args):
             # Generate image plots
             if env is not None: # Draw with encoded image from lmdb
                 with env.begin(write=False, buffers=True) as txn:
+                    if args.datasets == "panda":
+                        contour_thickness = 15
+                    else:
+                        contour_thickness = 50
                     patches_imgs = load_slide_patches(txn=txn, slide_id=slide_id, patch_count=len(coords), thumbnail_size=96) # raw patches images in tiles
-                    raw_img = construct_img(coords=coords, patches_imgs=patches_imgs)
-                    lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst, contour_thickness= 15, contour_color= (0, 255, 0))
+                    raw_img, lab_img = construct_img_label(coords=coords, patches_imgs=patches_imgs, y_inst=y_inst, contour_thickness= contour_thickness, contour_color= (0, 255, 0))
                     attn_img = construct_attn_heatmap(coords=coords, attn_weights=attn_np, patches_imgs=patches_imgs, raw_img=raw_img, is_clip_weights= True)
-            
             # Dot plots
             else: 
                 raw_img = construct_dot_raw_img(coords=coords)
