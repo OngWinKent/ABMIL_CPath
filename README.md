@@ -157,13 +157,13 @@ Use `--image_input` to read processed tiles from the LMDB file. Omit this flag t
 
 Select the feature encoder with `--enc_name`.
 
-| Encoder argument | Encoder architecture |
-| --- | --- |
-| `r18` | [ResNet-18](https://arxiv.org/abs/1512.03385) |
-| `r50` | [ResNet-50](https://arxiv.org/abs/1512.03385) |
-| `chief` | [CHIEF](https://github.com/hms-dbmi/CHIEF) |
-| `uni` | [UNI](https://huggingface.co/MahmoodLab/UNI) |
-| `gigap` | [GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) |
+| Encoder argument | Encoder architecture | Parameters | Pretrained Datasets |
+| --- | --- | --- | --- |
+| `r18` | [ResNet-18](https://arxiv.org/abs/1512.03385) | 12M | ImageNet-1K|
+| `r50` | [ResNet-50](https://arxiv.org/abs/1512.03385) | 26M| ImageNet-1K|
+| `chief` | [CHIEF](https://github.com/hms-dbmi/CHIEF) | 27M | Slide-60K|
+| `uni` | [UNI](https://huggingface.co/MahmoodLab/UNI) | 307M | Mass-100K|
+| `gigap` | [GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | 1134M | Slide-170K |
 
 For feature-input experiments, the chosen encoder must have a matching pre-extracted-feature directory. Foundation-model encoders may require access credentials from their respective model providers.
 
